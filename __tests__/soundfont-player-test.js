@@ -13,21 +13,20 @@ load.fetch = function (url) {
   return Promise.resolve(piano.toString())
 }
 
-describe('Soundfont player', function () {
-  describe('Load instruments', function () {
-    it('returns a promise', function () {
+describe('Soundfont player', () => {
+  describe('Load instruments', () => {
+    it('returns a promise', () => {
       var ac = new AudioContext()
       assert.strictEqual(typeof Soundfont.instrument(ac, 'acoustic_grand_piano').then, 'function')
     })
-    it('loads mp3 by default', function () {
+    it('loads mp3 by default', () => {
       var ac = new AudioContext()
       return Soundfont.instrument(ac, 'acoustic_grand_piano').then(function (piano) {
-        console.log('piano.url', piano.url)
         assert.strictEqual(piano.url,
           'https://gleitz.github.io/midi-js-soundfonts/MusyngKite/acoustic_grand_piano-mp3.js')
       })
     })
-    it('the promise resolve to an instrument', function () {
+    it('the promise resolve to an instrument', () => {
       var ac = new AudioContext()
       return Soundfont.instrument(ac, 'acoustic_grand_piano').then(function (piano) {
         assert.ok(piano)
@@ -35,7 +34,7 @@ describe('Soundfont player', function () {
         assert.strictEqual(typeof piano.play, 'function')
       })
     })
-    it('options.nameToUrl', function () {
+    it('options.nameToUrl', () => {
       var ac = new AudioContext()
       var toUrl = function (name) { return 'URL:' + name + '.js' }
       return Soundfont.instrument(ac, 'acoustic_grand_piano', { nameToUrl: toUrl }).then(function (piano) {
@@ -45,16 +44,16 @@ describe('Soundfont player', function () {
       })
     })
   })
-  describe('Build urls', function () {
-    it('get default url', function () {
+  describe('Build urls', () => {
+    it('get default url', () => {
       assert.strictEqual(Soundfont.nameToUrl('marimba'),
         'https://gleitz.github.io/midi-js-soundfonts/MusyngKite/marimba-mp3.js')
     })
-    it('get MusyngKite url', function () {
+    it('get MusyngKite url', () => {
       assert.strictEqual(Soundfont.nameToUrl('marimba', 'FluidR3_GM'),
         'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/marimba-mp3.js')
     })
-    it('accepts ogg', function () {
+    it('accepts ogg', () => {
       assert.strictEqual(Soundfont.nameToUrl('marimba', null, 'ogg'),
         'https://gleitz.github.io/midi-js-soundfonts/MusyngKite/marimba-ogg.js')
     })

@@ -1,8 +1,8 @@
 (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
 'use strict'
 
-var load = require('audio-loader')
-var player = require('sample-player')
+var load = require('@baocang/audio-loader')
+var player = require('@baocang/sample-audio-player')
 
 /**
  * Load a soundfont instrument. It returns a promise that resolves to a
@@ -45,7 +45,7 @@ function instrument (ac, name, options) {
   var toUrl = opts.nameToUrl || nameToUrl
   var url = isUrl(name) ? name : toUrl(name, opts.soundfont, opts.format)
 
-  return load(ac, url, { only: opts.only || opts.notes }).then(function (buffers) {
+  return load(url, { only: opts.only || opts.notes }).then(function (buffers) {
     var p = player(ac, buffers, opts).connect(opts.destination ? opts.destination : ac.destination)
     p.url = url
     p.name = name
@@ -85,7 +85,7 @@ Soundfont.nameToUrl = nameToUrl
 if (typeof module === 'object' && module.exports) module.exports = Soundfont
 if (typeof window !== 'undefined') window.Soundfont = Soundfont
 
-},{"./legacy":2,"audio-loader":6,"sample-player":10}],2:[function(require,module,exports){
+},{"./legacy":2,"@baocang/audio-loader":4,"@baocang/sample-audio-player":7}],2:[function(require,module,exports){
 'use strict'
 
 var parser = require('note-parser')
@@ -120,7 +120,7 @@ Soundfont.prototype.instrument = function (name, options) {
   var ctx = this.ctx
   name = name || 'default'
   if (name in this.instruments) return this.instruments[name]
-  var inst = {name: name, play: oscillatorPlayer(ctx, options)}
+  var inst = { name: name, play: oscillatorPlayer(ctx, options) }
   this.instruments[name] = inst
   if (name !== 'default') {
     var promise = Soundfont.instrument(ctx, name, options).then(function (instrument) {
@@ -227,169 +227,7 @@ Soundfont.noteToMidi = parser.midi
 
 module.exports = Soundfont
 
-},{"note-parser":8}],3:[function(require,module,exports){
-module.exports = ADSR
-
-function ADSR(audioContext){
-  var node = audioContext.createGain()
-
-  var voltage = node._voltage = getVoltage(audioContext)
-  var value = scale(voltage)
-  var startValue = scale(voltage)
-  var endValue = scale(voltage)
-
-  node._startAmount = scale(startValue)
-  node._endAmount = scale(endValue)
-
-  node._multiplier = scale(value)
-  node._multiplier.connect(node)
-  node._startAmount.connect(node)
-  node._endAmount.connect(node)
-
-  node.value = value.gain
-  node.startValue = startValue.gain
-  node.endValue = endValue.gain
-
-  node.startValue.value = 0
-  node.endValue.value = 0
-
-  Object.defineProperties(node, props)
-  return node
-}
-
-var props = {
-
-  attack: { value: 0, writable: true },
-  decay: { value: 0, writable: true },
-  sustain: { value: 1, writable: true },
-  release: {value: 0, writable: true },
-
-  getReleaseDuration: {
-    value: function(){
-      return this.release
-    }
-  },
-
-  start: {
-    value: function(at){
-      var target = this._multiplier.gain
-      var startAmount = this._startAmount.gain
-      var endAmount = this._endAmount.gain
-
-      this._voltage.start(at)
-      this._decayFrom = this._decayFrom = at+this.attack
-      this._startedAt = at
-
-      var sustain = this.sustain
-
-      target.cancelScheduledValues(at)
-      startAmount.cancelScheduledValues(at)
-      endAmount.cancelScheduledValues(at)
-
-      endAmount.setValueAtTime(0, at)
-
-      if (this.attack){
-        target.setValueAtTime(0, at)
-        target.linearRampToValueAtTime(1, at + this.attack)
-
-        startAmount.setValueAtTime(1, at)
-        startAmount.linearRampToValueAtTime(0, at + this.attack)
-      } else {
-        target.setValueAtTime(1, at)
-        startAmount.setValueAtTime(0, at)
-      }
-
-      if (this.decay){
-        target.setTargetAtTime(sustain, this._decayFrom, getTimeConstant(this.decay))
-      }
-    }
-  },
-
-  stop: {
-    value: function(at, isTarget){
-      if (isTarget){
-        at = at - this.release
-      }
-
-      var endTime = at + this.release
-      if (this.release){
-
-        var target = this._multiplier.gain
-        var startAmount = this._startAmount.gain
-        var endAmount = this._endAmount.gain
-
-        target.cancelScheduledValues(at)
-        startAmount.cancelScheduledValues(at)
-        endAmount.cancelScheduledValues(at)
-
-        var expFalloff = getTimeConstant(this.release)
-
-        // truncate attack (required as linearRamp is removed by cancelScheduledValues)
-        if (this.attack && at < this._decayFrom){
-          var valueAtTime = getValue(0, 1, this._startedAt, this._decayFrom, at)
-          target.linearRampToValueAtTime(valueAtTime, at)
-          startAmount.linearRampToValueAtTime(1-valueAtTime, at)
-          startAmount.setTargetAtTime(0, at, expFalloff)
-        }
-
-        endAmount.setTargetAtTime(1, at, expFalloff)
-        target.setTargetAtTime(0, at, expFalloff)
-      }
-
-      this._voltage.stop(endTime)
-      return endTime
-    }
-  },
-
-  onended: {
-    get: function(){
-      return this._voltage.onended
-    },
-    set: function(value){
-      this._voltage.onended = value
-    }
-  }
-
-}
-
-var flat = new Float32Array([1,1])
-function getVoltage(context){
-  var voltage = context.createBufferSource()
-  var buffer = context.createBuffer(1, 2, context.sampleRate)
-  buffer.getChannelData(0).set(flat)
-  voltage.buffer = buffer
-  voltage.loop = true
-  return voltage
-}
-
-function scale(node){
-  var gain = node.context.createGain()
-  node.connect(gain)
-  return gain
-}
-
-function getTimeConstant(time){
-  return Math.log(time+1)/Math.log(100)
-}
-
-function getValue(start, end, fromTime, toTime, at){
-  var difference = end - start
-  var time = toTime - fromTime
-  var truncateTime = at - fromTime
-  var phase = truncateTime / time
-  var value = start + phase * difference
-
-  if (value <= start) {
-      value = start
-  }
-  if (value >= end) {
-      value = end
-  }
-
-  return value
-}
-
-},{}],4:[function(require,module,exports){
+},{"note-parser":16}],3:[function(require,module,exports){
 'use strict'
 
 // DECODE UTILITIES
@@ -427,37 +265,63 @@ function decode (sBase64, nBlocksSize) {
 
 module.exports = { decode: decode }
 
-},{}],5:[function(require,module,exports){
-/* global XMLHttpRequest */
+},{}],4:[function(require,module,exports){
 'use strict'
+var load = require('./load')
+var context = require('audio-context')
+
+module.exports = function (source, options, cb) {
+  if (options instanceof Function) {
+    cb = options
+    options = {}
+  }
+  options = options || {}
+  options.ready = cb || function () {}
+  var ac = options && options.context ? options.context : context()
+  var defaults = { decode: getAudioDecoder(ac), fetch: fetch }
+  var opts = Object.assign(defaults, options)
+  return load(source, opts)
+}
 
 /**
- * Given a url and a return type, returns a promise to the content of the url
- * Basically it wraps a XMLHttpRequest into a Promise
+ * Wraps AudioContext's decodeAudio into a Promise
+ */
+function getAudioDecoder (ac) {
+  return function decode (buffer) {
+    return new Promise(function (resolve, reject) {
+      ac.decodeAudioData(buffer,
+        function (data) { resolve(data) },
+        function (err) { reject(err) })
+    })
+  }
+}
+
+/*
+ * Wraps a XMLHttpRequest into a Promise
  *
  * @param {String} url
  * @param {String} type - can be 'text' or 'arraybuffer'
  * @return {Promise}
  */
-module.exports = function (url, type) {
-  return new Promise(function (done, reject) {
+function fetch (url, type) {
+  return new Promise(function (resolve, reject) {
     var req = new XMLHttpRequest()
     if (type) req.responseType = type
 
     req.open('GET', url)
     req.onload = function () {
-      req.status === 200 ? done(req.response) : reject(Error(req.statusText))
+      req.status === 200 ? resolve(req.response) : reject(Error(req.statusText))
     }
     req.onerror = function () { reject(Error('Network Error')) }
     req.send()
   })
 }
 
-},{}],6:[function(require,module,exports){
+},{"./load":5,"audio-context":13}],5:[function(require,module,exports){
 'use strict'
 
 var base64 = require('./base64')
-var fetch = require('./fetch')
+var isBuffer = require('is-buffer')
 
 // Given a regex, return a function that test if against a string
 function fromRegex (r) {
@@ -478,22 +342,21 @@ function prefix (pre, name) {
  *
  * - __from__ {Function|String}: a function or string to convert from file names to urls.
  * If is a string it will be prefixed to the name:
- * `load(ac, 'snare.mp3', { from: 'http://audio.net/samples/' })`
+ * `load('snare.mp3', { from: 'http://audio.net/samples/' })`
  * If it's a function it receives the file name and should return the url as string.
  * - __only__ {Array} - when loading objects, if provided, only the given keys
  * will be included in the decoded object:
- * `load(ac, 'piano.json', { only: ['C2', 'D2'] })`
+ * `load('piano.json', { only: ['C2', 'D2'] })`
  *
- * @param {AudioContext} ac - the audio context
  * @param {Object} source - the object to be loaded
  * @param {Object} options - (Optional) the load options for that object
  * @param {Object} defaultValue - (Optional) the default value to return as
  * in a promise if not valid loader found
  */
-function load (ac, source, options, defVal) {
+function load (source, options, defVal) {
   var loader =
     // Basic audio loading
-      isArrayBuffer(source) ? loadArrayBuffer
+      isArrayBuffer(source) || isBuffer(source) ? decodeBuffer
     : isAudioFileName(source) ? loadAudioFile
     : isPromise(source) ? loadPromise
     // Compound objects
@@ -506,38 +369,40 @@ function load (ac, source, options, defVal) {
     : null
 
   var opts = options || {}
-  return loader ? loader(ac, source, opts)
+  var promise = loader ? loader(source, opts)
     : defVal ? Promise.resolve(defVal)
     : Promise.reject('Source not valid (' + source + ')')
+
+  return promise.then(function (data) {
+    opts.ready(null, data)
+    return data
+  }, function (err) {
+    opts.ready(err)
+    throw err
+  })
 }
-load.fetch = fetch
 
 // BASIC AUDIO LOADING
 // ===================
 
 // Load (decode) an array buffer
 function isArrayBuffer (o) { return o instanceof ArrayBuffer }
-function loadArrayBuffer (ac, array, options) {
-  return new Promise(function (done, reject) {
-    ac.decodeAudioData(array,
-      function (buffer) { done(buffer) },
-      function () { reject("Can't decode audio data (" + array.slice(0, 30) + '...)') }
-    )
-  })
+function decodeBuffer (array, options) {
+  return options.decode(array)
 }
 
 // Load an audio filename
-var isAudioFileName = fromRegex(/\.(mp3|wav|ogg)(\?.*)?$/i)
-function loadAudioFile (ac, name, options) {
+var isAudioFileName = fromRegex(/\.(mp3|wav|ogg|m4a)(\?.*)?$/i)
+function loadAudioFile (name, options) {
   var url = prefix(options.from, name)
-  return load(ac, load.fetch(url, 'arraybuffer'), options)
+  return load(options.fetch(url, 'arraybuffer'), options)
 }
 
 // Load the result of a promise
 function isPromise (o) { return o && typeof o.then === 'function' }
-function loadPromise (ac, promise, options) {
+function loadPromise (promise, options) {
   return promise.then(function (value) {
-    return load(ac, value, options)
+    return load(value, options)
   })
 }
 
@@ -546,20 +411,20 @@ function loadPromise (ac, promise, options) {
 
 // Try to load all the items of an array
 var isArray = Array.isArray
-function loadArrayData (ac, array, options) {
+function loadArrayData (array, options) {
   return Promise.all(array.map(function (data) {
-    return load(ac, data, options, data)
+    return load(data, options, data)
   }))
 }
 
 // Try to load all the values of a key/value object
 function isObject (o) { return o && typeof o === 'object' }
-function loadObjectData (ac, obj, options) {
+function loadObjectData (obj, options) {
   var dest = {}
   var promises = Object.keys(obj).map(function (key) {
     if (options.only && options.only.indexOf(key) === -1) return null
     var value = obj[key]
-    return load(ac, value, options, value).then(function (audio) {
+    return load(value, options, value).then(function (audio) {
       dest[key] = audio
     })
   })
@@ -568,9 +433,9 @@ function loadObjectData (ac, obj, options) {
 
 // Load the content of a JSON file
 var isJsonFileName = fromRegex(/\.json(\?.*)?$/i)
-function loadJsonFile (ac, name, options) {
+function loadJsonFile (name, options) {
   var url = prefix(options.from, name)
-  return load(ac, load.fetch(url, 'text').then(JSON.parse), options)
+  return load(options.fetch(url, 'text').then(JSON.parse), options)
 }
 
 // BASE64 ENCODED FORMATS
@@ -578,23 +443,23 @@ function loadJsonFile (ac, name, options) {
 
 // Load strings with Base64 encoded audio
 var isBase64Audio = fromRegex(/^data:audio/)
-function loadBase64Audio (ac, source, options) {
+function loadBase64Audio (source, options) {
   var i = source.indexOf(',')
-  return load(ac, base64.decode(source.slice(i + 1)).buffer, options)
+  return load(base64.decode(source.slice(i + 1)).buffer, options)
 }
 
 // Load .js files with MidiJS soundfont prerendered audio
 var isJsFileName = fromRegex(/\.js(\?.*)?$/i)
-function loadMidiJSFile (ac, name, options) {
+function loadMidiJSFile (name, options) {
   var url = prefix(options.from, name)
-  return load(ac, load.fetch(url, 'text').then(midiJsToJson), options)
+  return load(options.fetch(url, 'text').then(midiJsToJson), options)
 }
 
 // convert a MIDI.js javascript soundfont file to json
 function midiJsToJson (data) {
   var begin = data.indexOf('MIDI.Soundfont.')
   if (begin < 0) throw Error('Invalid MIDI.js Soundfont format')
-  begin = data.indexOf('=', begin) + 2
+  begin = data.indexOf('=', begin) + 1;
   var end = data.lastIndexOf(',')
   return JSON.parse(data.slice(begin, end) + '}')
 }
@@ -602,16 +467,7 @@ function midiJsToJson (data) {
 if (typeof module === 'object' && module.exports) module.exports = load
 if (typeof window !== 'undefined') window.loadAudio = load
 
-},{"./base64":4,"./fetch":5}],7:[function(require,module,exports){
-(function (global){
-(function(e){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=e()}else if(typeof define==="function"&&define.amd){define([],e)}else{var t;if(typeof window!=="undefined"){t=window}else if(typeof global!=="undefined"){t=global}else if(typeof self!=="undefined"){t=self}else{t=this}t.midimessage=e()}})(function(){var e,t,s;return function o(e,t,s){function a(n,i){if(!t[n]){if(!e[n]){var l=typeof require=="function"&&require;if(!i&&l)return l(n,!0);if(r)return r(n,!0);var h=new Error("Cannot find module '"+n+"'");throw h.code="MODULE_NOT_FOUND",h}var c=t[n]={exports:{}};e[n][0].call(c.exports,function(t){var s=e[n][1][t];return a(s?s:t)},c,c.exports,o,e,t,s)}return t[n].exports}var r=typeof require=="function"&&require;for(var n=0;n<s.length;n++)a(s[n]);return a}({1:[function(e,t,s){"use strict";Object.defineProperty(s,"__esModule",{value:true});s["default"]=function(e){function t(e){this._event=e;this._data=e.data;this.receivedTime=e.receivedTime;if(this._data&&this._data.length<2){console.warn("Illegal MIDI message of length",this._data.length);return}this._messageCode=e.data[0]&240;this.channel=e.data[0]&15;switch(this._messageCode){case 128:this.messageType="noteoff";this.key=e.data[1]&127;this.velocity=e.data[2]&127;break;case 144:this.messageType="noteon";this.key=e.data[1]&127;this.velocity=e.data[2]&127;break;case 160:this.messageType="keypressure";this.key=e.data[1]&127;this.pressure=e.data[2]&127;break;case 176:this.messageType="controlchange";this.controllerNumber=e.data[1]&127;this.controllerValue=e.data[2]&127;if(this.controllerNumber===120&&this.controllerValue===0){this.channelModeMessage="allsoundoff"}else if(this.controllerNumber===121){this.channelModeMessage="resetallcontrollers"}else if(this.controllerNumber===122){if(this.controllerValue===0){this.channelModeMessage="localcontroloff"}else{this.channelModeMessage="localcontrolon"}}else if(this.controllerNumber===123&&this.controllerValue===0){this.channelModeMessage="allnotesoff"}else if(this.controllerNumber===124&&this.controllerValue===0){this.channelModeMessage="omnimodeoff"}else if(this.controllerNumber===125&&this.controllerValue===0){this.channelModeMessage="omnimodeon"}else if(this.controllerNumber===126){this.channelModeMessage="monomodeon"}else if(this.controllerNumber===127){this.channelModeMessage="polymodeon"}break;case 192:this.messageType="programchange";this.program=e.data[1];break;case 208:this.messageType="channelpressure";this.pressure=e.data[1]&127;break;case 224:this.messageType="pitchbendchange";var t=e.data[2]&127;var s=e.data[1]&127;this.pitchBend=(t<<8)+s;break}}return new t(e)};t.exports=s["default"]},{}]},{},[1])(1)});
-
-}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],8:[function(require,module,exports){
-!function(t,n){"object"==typeof exports&&"undefined"!=typeof module?n(exports):"function"==typeof define&&define.amd?define(["exports"],n):n(t.NoteParser=t.NoteParser||{})}(this,function(t){"use strict";function n(t,n){return Array(n+1).join(t)}function r(t){return"number"==typeof t}function e(t){return"string"==typeof t}function u(t){return void 0!==t}function c(t,n){return Math.pow(2,(t-69)/12)*(n||440)}function o(){return b}function i(t,n,r){if("string"!=typeof t)return null;var e=b.exec(t);if(!e||!n&&e[4])return null;var u={letter:e[1].toUpperCase(),acc:e[2].replace(/x/g,"##")};u.pc=u.letter+u.acc,u.step=(u.letter.charCodeAt(0)+3)%7,u.alt="b"===u.acc[0]?-u.acc.length:u.acc.length;var o=A[u.step]+u.alt;return u.chroma=o<0?12+o:o%12,e[3]&&(u.oct=+e[3],u.midi=o+12*(u.oct+1),u.freq=c(u.midi,r)),n&&(u.tonicOf=e[4]),u}function f(t){return r(t)?t<0?n("b",-t):n("#",t):""}function a(t){return r(t)?""+t:""}function l(t,n,r){return null===t||void 0===t?null:t.step?l(t.step,t.alt,t.oct):t<0||t>6?null:C.charAt(t)+f(n)+a(r)}function p(t){if((r(t)||e(t))&&t>=0&&t<128)return+t;var n=i(t);return n&&u(n.midi)?n.midi:null}function s(t,n){var r=p(t);return null===r?null:c(r,n)}function d(t){return(i(t)||{}).letter}function m(t){return(i(t)||{}).acc}function h(t){return(i(t)||{}).pc}function v(t){return(i(t)||{}).step}function g(t){return(i(t)||{}).alt}function x(t){return(i(t)||{}).chroma}function y(t){return(i(t)||{}).oct}var b=/^([a-gA-G])(#{1,}|b{1,}|x{1,}|)(-?\d*)\s*(.*)\s*$/,A=[0,2,4,5,7,9,11],C="CDEFGAB";t.regex=o,t.parse=i,t.build=l,t.midi=p,t.freq=s,t.letter=d,t.acc=m,t.pc=h,t.step=v,t.alt=g,t.chroma=x,t.oct=y});
-
-
-},{}],9:[function(require,module,exports){
+},{"./base64":3,"is-buffer":14}],6:[function(require,module,exports){
 
 module.exports = function (player) {
   /**
@@ -639,7 +495,7 @@ function chain (fn1, fn2) {
   return function (a, b, c, d) { fn1(a, b, c, d); fn2(a, b, c, d) }
 }
 
-},{}],10:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 'use strict'
 
 var player = require('./player')
@@ -655,7 +511,7 @@ function SamplePlayer (ac, source, options) {
 if (typeof module === 'object' && module.exports) module.exports = SamplePlayer
 if (typeof window !== 'undefined') window.SamplePlayer = SamplePlayer
 
-},{"./events":9,"./midi":11,"./notes":12,"./player":13,"./scheduler":14}],11:[function(require,module,exports){
+},{"./events":6,"./midi":8,"./notes":9,"./player":10,"./scheduler":11}],8:[function(require,module,exports){
 var midimessage = require('midimessage')
 
 module.exports = function (player) {
@@ -706,7 +562,7 @@ module.exports = function (player) {
   return player
 }
 
-},{"midimessage":7}],12:[function(require,module,exports){
+},{"midimessage":15}],9:[function(require,module,exports){
 'use strict'
 
 var note = require('note-parser')
@@ -744,7 +600,7 @@ function mapBuffers (buffers, toKey) {
   }, {})
 }
 
-},{"note-parser":15}],13:[function(require,module,exports){
+},{"note-parser":16}],10:[function(require,module,exports){
 /* global AudioBuffer */
 'use strict'
 
@@ -958,7 +814,7 @@ function centsToRate (cents) { return cents ? Math.pow(2, cents / 1200) : 1 }
 
 module.exports = SamplePlayer
 
-},{"adsr":3}],14:[function(require,module,exports){
+},{"adsr":12}],11:[function(require,module,exports){
 'use strict'
 
 var isArr = Array.isArray
@@ -1022,155 +878,234 @@ module.exports = function (player) {
   return player
 }
 
-},{}],15:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
+module.exports = ADSR
+
+function ADSR(audioContext){
+  var node = audioContext.createGain()
+
+  var voltage = node._voltage = getVoltage(audioContext)
+  var value = scale(voltage)
+  var startValue = scale(voltage)
+  var endValue = scale(voltage)
+
+  node._startAmount = scale(startValue)
+  node._endAmount = scale(endValue)
+
+  node._multiplier = scale(value)
+  node._multiplier.connect(node)
+  node._startAmount.connect(node)
+  node._endAmount.connect(node)
+
+  node.value = value.gain
+  node.startValue = startValue.gain
+  node.endValue = endValue.gain
+
+  node.startValue.value = 0
+  node.endValue.value = 0
+
+  Object.defineProperties(node, props)
+  return node
+}
+
+var props = {
+
+  attack: { value: 0, writable: true },
+  decay: { value: 0, writable: true },
+  sustain: { value: 1, writable: true },
+  release: {value: 0, writable: true },
+
+  getReleaseDuration: {
+    value: function(){
+      return this.release
+    }
+  },
+
+  start: {
+    value: function(at){
+      var target = this._multiplier.gain
+      var startAmount = this._startAmount.gain
+      var endAmount = this._endAmount.gain
+
+      this._voltage.start(at)
+      this._decayFrom = this._decayFrom = at+this.attack
+      this._startedAt = at
+
+      var sustain = this.sustain
+
+      target.cancelScheduledValues(at)
+      startAmount.cancelScheduledValues(at)
+      endAmount.cancelScheduledValues(at)
+
+      endAmount.setValueAtTime(0, at)
+
+      if (this.attack){
+        target.setValueAtTime(0, at)
+        target.linearRampToValueAtTime(1, at + this.attack)
+
+        startAmount.setValueAtTime(1, at)
+        startAmount.linearRampToValueAtTime(0, at + this.attack)
+      } else {
+        target.setValueAtTime(1, at)
+        startAmount.setValueAtTime(0, at)
+      }
+
+      if (this.decay){
+        target.setTargetAtTime(sustain, this._decayFrom, getTimeConstant(this.decay))
+      }
+    }
+  },
+
+  stop: {
+    value: function(at, isTarget){
+      if (isTarget){
+        at = at - this.release
+      }
+
+      var endTime = at + this.release
+      if (this.release){
+
+        var target = this._multiplier.gain
+        var startAmount = this._startAmount.gain
+        var endAmount = this._endAmount.gain
+
+        target.cancelScheduledValues(at)
+        startAmount.cancelScheduledValues(at)
+        endAmount.cancelScheduledValues(at)
+
+        var expFalloff = getTimeConstant(this.release)
+
+        // truncate attack (required as linearRamp is removed by cancelScheduledValues)
+        if (this.attack && at < this._decayFrom){
+          var valueAtTime = getValue(0, 1, this._startedAt, this._decayFrom, at)
+          target.linearRampToValueAtTime(valueAtTime, at)
+          startAmount.linearRampToValueAtTime(1-valueAtTime, at)
+          startAmount.setTargetAtTime(0, at, expFalloff)
+        }
+
+        endAmount.setTargetAtTime(1, at, expFalloff)
+        target.setTargetAtTime(0, at, expFalloff)
+      }
+
+      this._voltage.stop(endTime)
+      return endTime
+    }
+  },
+
+  onended: {
+    get: function(){
+      return this._voltage.onended
+    },
+    set: function(value){
+      this._voltage.onended = value
+    }
+  }
+
+}
+
+var flat = new Float32Array([1,1])
+function getVoltage(context){
+  var voltage = context.createBufferSource()
+  var buffer = context.createBuffer(1, 2, context.sampleRate)
+  buffer.getChannelData(0).set(flat)
+  voltage.buffer = buffer
+  voltage.loop = true
+  return voltage
+}
+
+function scale(node){
+  var gain = node.context.createGain()
+  node.connect(gain)
+  return gain
+}
+
+function getTimeConstant(time){
+  return Math.log(time+1)/Math.log(100)
+}
+
+function getValue(start, end, fromTime, toTime, at){
+  var difference = end - start
+  var time = toTime - fromTime
+  var truncateTime = at - fromTime
+  var phase = truncateTime / time
+  var value = start + phase * difference
+
+  if (value <= start) {
+      value = start
+  }
+  if (value >= end) {
+      value = end
+  }
+
+  return value
+}
+
+},{}],13:[function(require,module,exports){
 'use strict'
 
-var REGEX = /^([a-gA-G])(#{1,}|b{1,}|x{1,}|)(-?\d*)\s*(.*)\s*$/
-/**
- * A regex for matching note strings in scientific notation.
- *
- * @name regex
- * @function
- * @return {RegExp} the regexp used to parse the note name
- *
- * The note string should have the form `letter[accidentals][octave][element]`
- * where:
- *
- * - letter: (Required) is a letter from A to G either upper or lower case
- * - accidentals: (Optional) can be one or more `b` (flats), `#` (sharps) or `x` (double sharps).
- * They can NOT be mixed.
- * - octave: (Optional) a positive or negative integer
- * - element: (Optional) additionally anything after the duration is considered to
- * be the element name (for example: 'C2 dorian')
- *
- * The executed regex contains (by array index):
- *
- * - 0: the complete string
- * - 1: the note letter
- * - 2: the optional accidentals
- * - 3: the optional octave
- * - 4: the rest of the string (trimmed)
- *
- * @example
- * var parser = require('note-parser')
- * parser.regex.exec('c#4')
- * // => ['c#4', 'c', '#', '4', '']
- * parser.regex.exec('c#4 major')
- * // => ['c#4major', 'c', '#', '4', 'major']
- * parser.regex().exec('CMaj7')
- * // => ['CMaj7', 'C', '', '', 'Maj7']
- */
-function regex () { return REGEX }
+var cache = {}
 
-var SEMITONES = [0, 2, 4, 5, 7, 9, 11]
-/**
- * Parse a note name in scientific notation an return it's components,
- * and some numeric properties including midi number and frequency.
- *
- * @name parse
- * @function
- * @param {String} note - the note string to be parsed
- * @param {Boolean} isTonic - true if the note is the tonic of something.
- * If true, en extra tonicOf property is returned. It's false by default.
- * @param {Float} tunning - The frequency of A4 note to calculate frequencies.
- * By default it 440.
- * @return {Object} the parsed note name or null if not a valid note
- *
- * The parsed note name object will ALWAYS contains:
- * - letter: the uppercase letter of the note
- * - acc: the accidentals of the note (only sharps or flats)
- * - pc: the pitch class (letter + acc)
- * - step: s a numeric representation of the letter. It's an integer from 0 to 6
- * where 0 = C, 1 = D ... 6 = B
- * - alt: a numeric representation of the accidentals. 0 means no alteration,
- * positive numbers are for sharps and negative for flats
- * - chroma: a numeric representation of the pitch class. It's like midi for
- * pitch classes. 0 = C, 1 = C#, 2 = D ... It can have negative values: -1 = Cb.
- * Can detect pitch class enhramonics.
- *
- * If the note has octave, the parser object will contain:
- * - oct: the octave number (as integer)
- * - midi: the midi number
- * - freq: the frequency (using tuning parameter as base)
- *
- * If the parameter `isTonic` is set to true, the parsed object will contain:
- * - tonicOf: the rest of the string that follows note name (left and right trimmed)
- *
- * @example
- * var parse = require('note-parser').parse
- * parse('Cb4')
- * // => { letter: 'C', acc: 'b', pc: 'Cb', step: 0, alt: -1, chroma: -1,
- *         oct: 4, midi: 59, freq: 246.94165062806206 }
- * // if no octave, no midi, no freq
- * parse('fx')
- * // => { letter: 'F', acc: '##', pc: 'F##', step: 3, alt: 2, chroma: 7 })
- */
-function parse (str, isTonic, tuning) {
-  if (typeof str !== 'string') return null
-  var m = REGEX.exec(str)
-  if (!m || !isTonic && m[4]) return null
+module.exports = function getContext (options) {
+	if (typeof window === 'undefined') return null
+	
+	var OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext
+	var Context = window.AudioContext || window.webkitAudioContext
+	
+	if (!Context) return null
 
-  var p = { letter: m[1].toUpperCase(), acc: m[2].replace(/x/g, '##') }
-  p.pc = p.letter + p.acc
-  p.step = (p.letter.charCodeAt(0) + 3) % 7
-  p.alt = p.acc[0] === 'b' ? -p.acc.length : p.acc.length
-  p.chroma = SEMITONES[p.step] + p.alt
-  if (m[3]) {
-    p.oct = +m[3]
-    p.midi = p.chroma + 12 * (p.oct + 1)
-    p.freq = midiToFreq(p.midi, tuning)
-  }
-  if (isTonic) p.tonicOf = m[4]
-  return p
+	if (typeof options === 'number') {
+		options = {sampleRate: options}
+	}
+
+	var sampleRate = options && options.sampleRate
+
+
+	if (options && options.offline) {
+		if (!OfflineContext) return null
+
+		return new OfflineContext(options.channels || 2, options.length, sampleRate || 44100)
+	}
+
+
+	//cache by sampleRate, rather strong guess
+	var ctx = cache[sampleRate]
+
+	if (ctx) return ctx
+
+	//several versions of firefox have issues with the
+	//constructor argument
+	//see: https://bugzilla.mozilla.org/show_bug.cgi?id=1361475
+	try {
+		ctx = new Context(options)
+	}
+	catch (err) {
+		ctx = new Context()
+	}
+	cache[ctx.sampleRate] = cache[sampleRate] = ctx
+
+	return ctx
 }
 
-/**
- * Given a midi number, return its frequency
- * @param {Integer} midi - midi note number
- * @param {Float} tuning - (Optional) the A4 tuning (440Hz by default)
- * @return {Float} frequency in hertzs
+},{}],14:[function(require,module,exports){
+/*!
+ * Determine if an object is a Buffer
+ *
+ * @author   Feross Aboukhadijeh <https://feross.org>
+ * @license  MIT
  */
-function midiToFreq (midi, tuning) {
-  return Math.pow(2, (midi - 69) / 12) * (tuning || 440)
+
+module.exports = function isBuffer (obj) {
+  return obj != null && obj.constructor != null &&
+    typeof obj.constructor.isBuffer === 'function' && obj.constructor.isBuffer(obj)
 }
 
-var parser = { parse: parse, regex: regex, midiToFreq: midiToFreq }
-var FNS = ['letter', 'acc', 'pc', 'step', 'alt', 'chroma', 'oct', 'midi', 'freq']
-FNS.forEach(function (name) {
-  parser[name] = function (src) {
-    var p = parse(src)
-    return p && (typeof p[name] !== 'undefined') ? p[name] : null
-  }
-})
+},{}],15:[function(require,module,exports){
+(function (global){(function (){
+(function(e){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=e()}else if(typeof define==="function"&&define.amd){define([],e)}else{var t;if(typeof window!=="undefined"){t=window}else if(typeof global!=="undefined"){t=global}else if(typeof self!=="undefined"){t=self}else{t=this}t.midimessage=e()}})(function(){var e,t,s;return function o(e,t,s){function a(n,i){if(!t[n]){if(!e[n]){var l=typeof require=="function"&&require;if(!i&&l)return l(n,!0);if(r)return r(n,!0);var h=new Error("Cannot find module '"+n+"'");throw h.code="MODULE_NOT_FOUND",h}var c=t[n]={exports:{}};e[n][0].call(c.exports,function(t){var s=e[n][1][t];return a(s?s:t)},c,c.exports,o,e,t,s)}return t[n].exports}var r=typeof require=="function"&&require;for(var n=0;n<s.length;n++)a(s[n]);return a}({1:[function(e,t,s){"use strict";Object.defineProperty(s,"__esModule",{value:true});s["default"]=function(e){function t(e){this._event=e;this._data=e.data;this.receivedTime=e.receivedTime;if(this._data&&this._data.length<2){console.warn("Illegal MIDI message of length",this._data.length);return}this._messageCode=e.data[0]&240;this.channel=e.data[0]&15;switch(this._messageCode){case 128:this.messageType="noteoff";this.key=e.data[1]&127;this.velocity=e.data[2]&127;break;case 144:this.messageType="noteon";this.key=e.data[1]&127;this.velocity=e.data[2]&127;break;case 160:this.messageType="keypressure";this.key=e.data[1]&127;this.pressure=e.data[2]&127;break;case 176:this.messageType="controlchange";this.controllerNumber=e.data[1]&127;this.controllerValue=e.data[2]&127;if(this.controllerNumber===120&&this.controllerValue===0){this.channelModeMessage="allsoundoff"}else if(this.controllerNumber===121){this.channelModeMessage="resetallcontrollers"}else if(this.controllerNumber===122){if(this.controllerValue===0){this.channelModeMessage="localcontroloff"}else{this.channelModeMessage="localcontrolon"}}else if(this.controllerNumber===123&&this.controllerValue===0){this.channelModeMessage="allnotesoff"}else if(this.controllerNumber===124&&this.controllerValue===0){this.channelModeMessage="omnimodeoff"}else if(this.controllerNumber===125&&this.controllerValue===0){this.channelModeMessage="omnimodeon"}else if(this.controllerNumber===126){this.channelModeMessage="monomodeon"}else if(this.controllerNumber===127){this.channelModeMessage="polymodeon"}break;case 192:this.messageType="programchange";this.program=e.data[1];break;case 208:this.messageType="channelpressure";this.pressure=e.data[1]&127;break;case 224:this.messageType="pitchbendchange";var t=e.data[2]&127;var s=e.data[1]&127;this.pitchBend=(t<<8)+s;break}}return new t(e)};t.exports=s["default"]},{}]},{},[1])(1)});
 
-module.exports = parser
+}).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{}],16:[function(require,module,exports){
+!function(t,n){"object"==typeof exports&&"undefined"!=typeof module?n(exports):"function"==typeof define&&define.amd?define(["exports"],n):n(t.NoteParser=t.NoteParser||{})}(this,function(t){"use strict";function n(t,n){return Array(n+1).join(t)}function r(t){return"number"==typeof t}function e(t){return"string"==typeof t}function u(t){return void 0!==t}function c(t,n){return Math.pow(2,(t-69)/12)*(n||440)}function o(){return b}function i(t,n,r){if("string"!=typeof t)return null;var e=b.exec(t);if(!e||!n&&e[4])return null;var u={letter:e[1].toUpperCase(),acc:e[2].replace(/x/g,"##")};u.pc=u.letter+u.acc,u.step=(u.letter.charCodeAt(0)+3)%7,u.alt="b"===u.acc[0]?-u.acc.length:u.acc.length;var o=A[u.step]+u.alt;return u.chroma=o<0?12+o:o%12,e[3]&&(u.oct=+e[3],u.midi=o+12*(u.oct+1),u.freq=c(u.midi,r)),n&&(u.tonicOf=e[4]),u}function f(t){return r(t)?t<0?n("b",-t):n("#",t):""}function a(t){return r(t)?""+t:""}function l(t,n,r){return null===t||void 0===t?null:t.step?l(t.step,t.alt,t.oct):t<0||t>6?null:C.charAt(t)+f(n)+a(r)}function p(t){if((r(t)||e(t))&&t>=0&&t<128)return+t;var n=i(t);return n&&u(n.midi)?n.midi:null}function s(t,n){var r=p(t);return null===r?null:c(r,n)}function d(t){return(i(t)||{}).letter}function m(t){return(i(t)||{}).acc}function h(t){return(i(t)||{}).pc}function v(t){return(i(t)||{}).step}function g(t){return(i(t)||{}).alt}function x(t){return(i(t)||{}).chroma}function y(t){return(i(t)||{}).oct}var b=/^([a-gA-G])(#{1,}|b{1,}|x{1,}|)(-?\d*)\s*(.*)\s*$/,A=[0,2,4,5,7,9,11],C="CDEFGAB";t.regex=o,t.parse=i,t.build=l,t.midi=p,t.freq=s,t.letter=d,t.acc=m,t.pc=h,t.step=v,t.alt=g,t.chroma=x,t.oct=y});
 
-// extra API docs
-/**
- * Get midi of a note
- *
- * @name midi
- * @function
- * @param {String} note - the note name
- * @return {Integer} the midi number of the note or null if not a valid note
- * or the note does NOT contains octave
- * @example
- * var parser = require('note-parser')
- * parser.midi('A4') // => 69
- * parser.midi('A') // => null
- */
-/**
- * Get freq of a note in hertzs (in a well tempered 440Hz A4)
- *
- * @name freq
- * @function
- * @param {String} note - the note name
- * @return {Float} the freq of the number if hertzs or null if not valid note
- * or the note does NOT contains octave
- * @example
- * var parser = require('note-parser')
- * parser.freq('A4') // => 440
- * parser.freq('A') // => null
- */
 
 },{}]},{},[1]);
